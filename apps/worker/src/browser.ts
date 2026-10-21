@@ -321,6 +321,10 @@ export async function createBrowserManager(
     let context: BrowserContext;
     try {
       const { chromium } = await import("playwright");
+      // CloakBrowser stealth Chromium when CLOAK_EXECUTABLE_PATH points at its
+      // binary; the bundled Playwright build stays the fallback for tests and
+      // local development so they never need the extra download.
+      const cloakExecutable = process.env.CLOAK_EXECUTABLE_PATH?.trim() || undefined;
       context = await chromium.launchPersistentContext(profileDir, {
         // Chromium does not need the worker API credential in its environment.
         env: {
@@ -329,6 +333,7 @@ export async function createBrowserManager(
           LANG: "C.UTF-8",
         },
         headless: true,
+        ...(cloakExecutable ? { executablePath: cloakExecutable } : {}),
         viewport: { width: 1280, height: 800 },
         proxy: { server: proxy.url, bypass: "<-loopback>" },
         serviceWorkers: "block",
