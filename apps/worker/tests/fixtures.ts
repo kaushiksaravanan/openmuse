@@ -10,6 +10,10 @@ export const fixtureTitle = "OpenMuse fixture";
 export const fixtureText = "Stable page text.";
 export const fixturePdf = await readFile(new URL("./fixtures/document.pdf", import.meta.url));
 
+// A login form that reports only the username name typed into it: the password
+// value is never written back to the page, mirroring the fill's no-echo contract.
+const loginFixture = `<form onsubmit="event.preventDefault();document.body.textContent='authenticated '+document.querySelector('[autocomplete=username]').value;return false;" aria-label="Sign in"><label>User <input autocomplete="username" id="user"></label><label>Password <input type="password" id="pass"></label><button type="submit" id="go">Sign in</button></form>`;
+
 export async function createBrowserFixture(options: { host?: string; port?: number } = {}) {
   const paths: string[] = [];
   const unexpected: string[] = [];
@@ -37,6 +41,7 @@ export async function createBrowserFixture(options: { host?: string; port?: numb
     }
     let body: string;
     if (path === "/page") body = fixtureText;
+    else if (path === "/login") body = loginFixture;
     else if (path === "/other") body = "Another fixture page.";
     else if (path === "/large?size=100000") body = "x".repeat(100_000);
     else if (path === "/large?size=100001") body = "x".repeat(100_001);

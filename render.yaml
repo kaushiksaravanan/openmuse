@@ -49,6 +49,10 @@ services:
       # Use the CLI-issued identity for the same Intelligence project as the key.
       - key: CPK_TELEMETRY_ID
         sync: false
+      # Optional: enables saved logins in chat. The same 32-byte base64 key
+      # (e.g. `openssl rand -base64 32`) must also be set on openmuse-browser.
+      - key: VAULT_KEY
+        sync: false
       # Delete these two entries, and the openmuse-browser service below, to
       # deploy without browsing. The API boots either way.
       - key: BROWSER_WORKER_URL
@@ -78,6 +82,9 @@ services:
         value: 0.0.0.0
       - key: WORKER_DATA_DIR
         value: /data
+      # Same value as VAULT_KEY on openmuse-api.
+      - key: VAULT_KEY
+        sync: false
 
   - type: web
     name: openmuse-web

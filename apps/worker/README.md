@@ -30,6 +30,7 @@ All endpoints except `GET /health` require `Authorization: Bearer <WORKER_TOKEN>
 | POST | `/sessions/:id/input` | One input below → `Session` |
 | GET | `/sessions/:id/downloads` | `{ downloads: { id, name, size, mimeType: "application/pdf" }[], failures: { id, name, code, message, createdAt }[] }` |
 | GET | `/sessions/:id/downloads/:downloadId` | PDF bytes, attachment disposition |
+| POST | `/sessions/:id/fill` | `{ host, username?, envelope, fillToken, submit }` → `{ filled: { username, password }, submitted, host }`; credential fill described below |
 
 `Session` is `{ id, title, url, status: "active" | "closed" | "error", updatedAt }`. UUIDs use versions 1–8 and RFC variant bits. Screenshot clicks must use native image coordinates, even when the displayed image is scaled.
 
@@ -41,6 +42,17 @@ Inputs:
 { "type": "key", "key": "Enter" }
 { "type": "scroll", "deltaY": 600 }
 ```
+
+## Credential fill
+
+`POST /sessions/:id/fill` is the one endpoint that may decrypt a saved password, and it does so only in Chromium's own memory. The server passes an AES-256-GCM `envelope` plus a `fillToken` minted with `VAULT_KEY` (a shared 32-byte base64 key set in both processes). The worker accepts a request only when:
+
+- the live page's exact hostname equals `host` (else `FILL_HOST_MISMATCH`, 409),
+- `fillToken` is a fresh, correctly signed, unused-in-flight HMAC for this session and host (else `FILL_TOKEN_INVALID`, 403; TTL is ten seconds),
+- a visible password field exists (else `FILL_NO_FIELD`, 422),
+- and `VAULT_KEY` is set (else `FILL_NOT_CONFIGURED`, 503) with a well-formed envelope (else `FILL_INVALID_ENVELOPE`, 400).
+
+The response carries booleans and the hostname only. The plaintext is typed through `keyboard.insertText` (trusted input events) and never placed in a response, log, screenshot, or stored file; DOM markers used to find the fields are removed in a `finally`.
 
 Supported keys: Enter, Tab, Escape, Backspace, Delete, arrow keys, Home, End, PageUp, PageDown, Control+a, Meta+a, Shift+Tab. Text input is limited to 10,000 characters; scrolling to ±5,000 pixels per request. Popups and dialogs are dismissed; service workers and WebSockets are disabled. Sites requiring those features may not work yet.
 

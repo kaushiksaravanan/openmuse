@@ -24,7 +24,15 @@ import { AgentService } from "./engine/service.ts";
 import { AppError } from "./errors.ts";
 import { Files } from "./files.ts";
 import { GoogleAuth } from "./google-auth.ts";
+import { backgroundFailure } from "./log.ts";
 import { rateLimit } from "./rate-limit.ts";
+import {
+  VaultService,
+  vaultEntrySchema,
+  vaultPatchSchema,
+  vaultRefSchema,
+  vaultSessionId,
+} from "./vault-service.ts";
 import { WorkspaceService } from "./workspace.ts";
 
 export async function createApp(
@@ -46,7 +54,16 @@ export async function createApp(
   });
   const browser = new BrowserService(db, config, auth, files);
   const computer = new ComputerService(db, config, options.docker);
-  const agent = new AgentService(db, config, workspace, files, actions, browser, computer);
+  const vault = new VaultService(db, config, browser);
+  const agent = new AgentService(db, config, workspace, files, actions, browser, computer, vault);
+  if (vault.configured()) {
+    // Every five minutes re-prove credential isolation by scanning stored agent
+    // data for a planted decoy password created with the first saved login.
+    const sweep = setInterval(() => {
+      vault.audit("local-user").catch((error) => backgroundFailure("vault audit", error));
+    }, 300_000);
+    sweep.unref();
+  }
   const intelligence = new CopilotKitIntelligence({ apiKey: config.intelligenceApiKey });
   const runtime = makeRuntime(config, agent, auth, intelligence);
   const app = new Hono<{ Variables: { owner: string } }>();
@@ -101,6 +118,7 @@ export async function createApp(
       mode: config.mode,
       agentConfigured: agentConfigured(config),
       browserConfigured: Boolean(config.workerUrl && config.workerToken),
+      vaultConfigured: vault.configured(),
     }),
   );
   let loginWindow = 0,
@@ -329,6 +347,59 @@ export async function createApp(
     await browser.input(c.get("owner"), c.req.param("id"), await c.req.json());
     return c.json({ ok: true });
   });
+  // Credential vault: saved login metadata only; no response ever carries a
+  // secret, and a pending fill executes against a hostname-checked page only.
+  app.get("/api/vault", async (c) =>
+    c.json(vault.configured() ? await vault.list(c.get("owner")) : []),
+  );
+  app.get("/api/vault/:id", async (c) => {
+    if (!vault.configured()) throw new AppError("Vault entry not found", 404);
+    const entries = await vault.list(c.get("owner"));
+    const found = entries.find((entry) => entry.id === c.req.param("id"));
+    if (!found) throw new AppError("Vault entry not found", 404);
+    return c.json(found);
+  });
+  app.post("/api/vault", async (c) =>
+    c.json(await vault.create(c.get("owner"), vaultEntrySchema.parse(await c.req.json())), 201),
+  );
+  app.put("/api/vault/:id", async (c) =>
+    c.json(
+      await vault.update(
+        c.get("owner"),
+        c.req.param("id"),
+        vaultPatchSchema.parse(await c.req.json()),
+      ),
+    ),
+  );
+  app.delete("/api/vault/:id", async (c) => {
+    await vault.remove(c.get("owner"), c.req.param("id"));
+    return c.json({ ok: true });
+  });
+  app.post("/api/vault/fill", async (c) => {
+    const body = z
+      .object({
+        sessionId: z.string().regex(vaultSessionId),
+        ref: vaultRefSchema,
+        submit: z.boolean().default(false),
+      })
+      .parse(await c.req.json());
+    if (!vault.configured())
+      throw new AppError(
+        "Set VAULT_KEY in the server and the browser worker to use saved logins",
+        503,
+      );
+    const result = await vault.fillNow(c.get("owner"), body.ref, body.sessionId, body.submit);
+    return c.json(result);
+  });
+  app.post("/api/vault/fills/:id/decide", async (c) => {
+    const body = z.object({ decision: z.enum(["approve", "deny"]) }).parse(await c.req.json());
+    return c.json(await vault.decide(c.get("owner"), c.req.param("id"), body.decision));
+  });
+  app.post("/api/vault/audit", async (c) =>
+    c.json(
+      vault.configured() ? await vault.audit(c.get("owner")) : { checked: false, leaked: false },
+    ),
+  );
   app.all("/api/copilotkit/*", async (c) => {
     if (!agentConfigured(config))
       throw new AppError(

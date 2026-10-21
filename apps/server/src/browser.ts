@@ -21,6 +21,13 @@ const readSchema = z.object({
   text: z.string().max(100_000),
   truncated: z.boolean(),
 });
+// The worker answers credential fills with booleans and a hostname only; any
+// other shape is rejected so no textarea/DOM echo can slip through the transport.
+const fillResponseSchema = z.object({
+  filled: z.object({ username: z.boolean(), password: z.boolean() }),
+  submitted: z.boolean(),
+  host: z.string().max(253),
+});
 const failureSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -253,6 +260,24 @@ export class BrowserService {
   }
   async imports(owner: string, id: string) {
     return this.serial(id, () => this.importsOwned(owner, id));
+  }
+  /**
+   * Hand an encrypted credential envelope to the worker. The payload crosses
+   * this boundary sealed and the worker answers booleans; no plaintext ever
+   * passes through this service.
+   */
+  async fill(owner: string, id: string, payload: unknown) {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload))
+      throw new AppError("A JSON object is required for browser fill", 422);
+    return this.serial(id, async () => {
+      await this.get(owner, id);
+      const response = fillResponseSchema.parse(
+        await (await this.request(`/sessions/${encodeURIComponent(id)}/fill`, payload)).json(),
+      );
+      // Logins navigate the page; refresh the saved metadata, ignoring transient page errors.
+      await this.readOwned(owner, id).catch(() => {});
+      return response;
+    });
   }
   private async importsOwned(owner: string, id: string) {
     await this.get(owner, id);

@@ -49,6 +49,7 @@ export interface Config {
   googleRedirectUri: string;
   workerUrl?: string;
   workerToken?: string;
+  vaultKey?: string;
   taskWorkerEnabled?: boolean;
   webSearchEnabled?: boolean;
   computerEnabled?: boolean;
@@ -155,6 +156,7 @@ export function readConfig(): Config {
     googleRedirectUri: `${publicUrl}/api/google/callback`,
     workerUrl: browserWorkerUrl(process.env.BROWSER_WORKER_URL),
     workerToken: process.env.WORKER_TOKEN,
+    vaultKey: process.env.VAULT_KEY || undefined,
     taskWorkerEnabled: process.env.TASK_WORKER_ENABLED !== "false",
     webSearchEnabled: process.env.WEB_SEARCH_ENABLED !== "false",
     computerEnabled: process.env.COMPUTER_ENABLED === "true",

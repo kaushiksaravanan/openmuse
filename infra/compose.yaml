@@ -8,6 +8,10 @@ services:
     environment:
       WORKER_HOST: 0.0.0.0
       WORKER_TOKEN: ${WORKER_TOKEN:?Set WORKER_TOKEN to a random secret of at least 32 characters}
+      # Optional: a 32-byte base64 AES key shared with the API server. The worker
+      # needs it only inside browser memory to decrypt credential envelopes at
+      # fill time; set the same value as VAULT_KEY in the server environment.
+      VAULT_KEY: ${VAULT_KEY:-}
     ports:
       - "127.0.0.1:8790:8790"
     volumes:

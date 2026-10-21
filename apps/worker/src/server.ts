@@ -36,6 +36,7 @@ export async function createWorkerServer(
     dataDir: string;
     maxSessions?: number;
     idleTimeoutMs?: number;
+    vaultKey?: string;
   },
   createBrowser = createBrowserManager,
 ) {
@@ -71,7 +72,7 @@ export async function createWorkerServer(
         return;
       }
       const match =
-        /^\/sessions\/([^/]+)\/(navigate|close|screenshot|read|input|downloads)(?:\/([^/]+))?$/.exec(
+        /^\/sessions\/([^/]+)\/(navigate|close|screenshot|read|input|fill|downloads)(?:\/([^/]+))?$/.exec(
           pathname,
         );
       if (!match) throw new WorkerError("NOT_FOUND", "Worker endpoint not found.", 404);
@@ -84,6 +85,8 @@ export async function createWorkerServer(
         json(200, await browser.closeSession(id));
       else if (action === "input" && !downloadId && request.method === "POST")
         json(200, await browser.input(id, await readBody(request)));
+      else if (action === "fill" && !downloadId && request.method === "POST")
+        json(200, await browser.fill(id, await readBody(request)));
       else if (action === "read" && !downloadId && request.method === "GET")
         json(200, await browser.read(id));
       else if (action === "screenshot" && !downloadId && request.method === "GET") {

@@ -14,7 +14,7 @@
     "dev:mobile": "pnpm --dir apps/mobile start",
     "dev:web": "pnpm --dir apps/mobile web",
     "test": "tsx --import ./tests/setup.ts --test tests/*.test.ts apps/mobile/test/*.test.ts",
-    "test:browser": "node --experimental-strip-types --test apps/worker/tests/lifecycle.test.ts",
+    "test:browser": "node --experimental-strip-types --test apps/worker/tests/lifecycle.test.ts apps/worker/tests/fill.test.ts",
     "typecheck": "tsc --noEmit && pnpm --dir apps/mobile typecheck",
     "lint": "biome check .",
     "format": "biome check --write .",

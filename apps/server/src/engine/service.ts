@@ -32,6 +32,7 @@ import { AppError } from "../errors.ts";
 import type { Files } from "../files.ts";
 import { backgroundFailure } from "../log.ts";
 import { SearchService } from "../search.ts";
+import type { VaultService } from "../vault-service.ts";
 import type { WorkspaceService } from "../workspace.ts";
 import { analyzeSpending } from "./finance.ts";
 import { executeModelTask } from "./model.ts";
@@ -62,6 +63,7 @@ export class AgentService {
     readonly actions: ActionService,
     readonly browser: BrowserService,
     readonly computer: ComputerService = new ComputerService(db, config),
+    readonly vault?: VaultService,
   ) {
     this.search = new SearchService(db);
     this.worker = new TaskWorker(db, (owner, task, context) => this.execute(owner, task, context), {
