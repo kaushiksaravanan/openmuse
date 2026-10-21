@@ -144,6 +144,14 @@ export function WorkspaceTools() {
       <ServerToolCard name="Memory" result={result} loading={status !== "complete"} />
     ),
   });
+  useRenderTool({
+    name: "autoresearch",
+    description: "Show the autonomous research loop",
+    parameters: displayParameters,
+    render: ({ result, status }) => (
+      <ServerToolCard name="Autoresearch" result={result} loading={status !== "complete"} />
+    ),
+  });
   return null;
 }
 function ServerToolCard({

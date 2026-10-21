@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { BrowserContext, Page } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 import {
   capturePdfDownload,
   MAX_DOWNLOAD_BYTES,
@@ -25,6 +25,9 @@ type Running = {
   touched: number;
   pending: Set<Promise<void>>;
   downloadError?: boolean;
+  // Set in desktop mode: the shared Chrome over CDP must never be closed with
+  // the session; only this session's own page (tab) is.
+  cdpBrowser?: Browser;
 };
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -144,13 +147,19 @@ export async function createBrowserManager(
     const stored = sessions.get(id);
     if (!stored) throw new WorkerError("SESSION_NOT_FOUND", "Browser session not found.", 404);
     if (instance) {
-      try {
-        await instance.context.storageState({ path: join(directory(id), "storage.json") });
-      } catch {
-        // Cookie persistence is best-effort during teardown. A crashed or
-        // unreachable browser must still release its context and session slot.
+      if (instance.cdpBrowser) {
+        // Desktop mode tears down only this session's tab; the shared visible
+        // browser (and its logged-in profile) keeps running.
+        await instance.page.close().catch(() => {});
+      } else {
+        try {
+          await instance.context.storageState({ path: join(directory(id), "storage.json") });
+        } catch {
+          // Cookie persistence is best-effort during teardown. A crashed or
+          // unreachable browser must still release its context and session slot.
+        }
+        await instance.context.close().catch(() => {});
       }
-      await instance.context.close().catch(() => {});
       await Promise.allSettled(instance.pending);
       running.delete(id);
     }
@@ -319,37 +328,60 @@ export async function createBrowserManager(
     await mkdir(profileDir, { recursive: true, mode: 0o700 });
     await mkdir(tempDirectory, { recursive: true, mode: 0o700 });
     let context: BrowserContext;
+    // Desktop mode attaches to the visible Chrome (anti-bot stealth binary,
+    // the user's own logged-in profile) instead of launching a private
+    // headless context.
+    const cdpEndpoint = process.env.WORKER_CDP_ENDPOINT?.trim() || undefined;
+    let cdpBrowser: Browser | undefined;
     try {
       const { chromium } = await import("playwright");
-      // CloakBrowser stealth Chromium when CLOAK_EXECUTABLE_PATH points at its
-      // binary; the bundled Playwright build stays the fallback for tests and
-      // local development so they never need the extra download.
-      const cloakExecutable = process.env.CLOAK_EXECUTABLE_PATH?.trim() || undefined;
-      context = await chromium.launchPersistentContext(profileDir, {
-        // Chromium does not need the worker API credential in its environment.
-        env: {
-          HOME: process.env.HOME ?? "/tmp",
-          PATH: process.env.PATH ?? "/usr/bin:/bin",
-          LANG: "C.UTF-8",
-        },
-        headless: true,
-        ...(cloakExecutable ? { executablePath: cloakExecutable } : {}),
-        viewport: { width: 1280, height: 800 },
-        proxy: { server: proxy.url, bypass: "<-loopback>" },
-        serviceWorkers: "block",
-        acceptDownloads: true,
-        downloadsPath: tempDirectory,
-        timeout: 25_000,
-        args: [
-          "--disable-quic",
-          "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-          "--disable-extensions",
-          "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
-        ],
-      });
-    } catch {
+      if (cdpEndpoint) {
+        cdpBrowser = await chromium.connectOverCDP(cdpEndpoint, { timeout: 25_000 });
+        const shared = cdpBrowser.contexts()[0];
+        if (!shared) {
+          throw new WorkerError(
+            "BROWSER_UNAVAILABLE",
+            "The desktop browser has no open profile context yet.",
+            503,
+          );
+        }
+        context = shared;
+      } else {
+        // CloakBrowser stealth Chromium when CLOAK_EXECUTABLE_PATH points at its
+        // binary; the bundled Playwright build stays the fallback for tests and
+        // local development so they never need the extra download.
+        const cloakExecutable = process.env.CLOAK_EXECUTABLE_PATH?.trim() || undefined;
+        context = await chromium.launchPersistentContext(profileDir, {
+          // Chromium does not need the worker API credential in its environment.
+          env: {
+            HOME: process.env.HOME ?? "/tmp",
+            PATH: process.env.PATH ?? "/usr/bin:/bin",
+            LANG: "C.UTF-8",
+          },
+          headless: true,
+          ...(cloakExecutable ? { executablePath: cloakExecutable } : {}),
+          viewport: { width: 1280, height: 800 },
+          proxy: { server: proxy.url, bypass: "<-loopback>" },
+          serviceWorkers: "block",
+          acceptDownloads: true,
+          downloadsPath: tempDirectory,
+          timeout: 25_000,
+          args: [
+            "--disable-quic",
+            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+            "--disable-extensions",
+            "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
+          ],
+        });
+      }
+    } catch (error) {
+      // A CDP attach failure must only disconnect; the shared visible browser
+      // and its tabs must never be closed from here.
+      await cdpBrowser?.close().catch(() => {});
+      cdpBrowser = undefined;
       if (!previous) await rm(directory(id), { recursive: true, force: true });
       await rm(tempDirectory, { recursive: true, force: true });
+      if (error instanceof WorkerError) throw error;
       throw new WorkerError(
         "BROWSER_UNAVAILABLE",
         "Chromium could not start. Rebuild the browser-worker image and check its resource limits.",
@@ -358,31 +390,37 @@ export async function createBrowserManager(
     }
     try {
       const statePath = join(directory(id), "storage.json");
-      try {
-        const state = JSON.parse(await readFile(statePath, "utf8")) as Awaited<
-          ReturnType<BrowserContext["storageState"]>
-        >;
-        await context.addCookies(state.cookies);
-      } catch (error) {
-        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
-      }
-      await context.route("**/*", async (route) => {
+      if (!cdpBrowser) {
         try {
-          await validatePublicUrl(route.request().url());
-          await route.continue();
-        } catch {
-          await route.abort("blockedbyclient").catch(() => {});
+          const state = JSON.parse(await readFile(statePath, "utf8")) as Awaited<
+            ReturnType<BrowserContext["storageState"]>
+          >;
+          await context.addCookies(state.cookies);
+        } catch (error) {
+          if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
         }
-      });
-      await context.routeWebSocket("**/*", (socket) => socket.close());
-      for (const old of context.pages()) await old.close();
+        await context.route("**/*", async (route) => {
+          try {
+            await validatePublicUrl(route.request().url());
+            await route.continue();
+          } catch {
+            await route.abort("blockedbyclient").catch(() => {});
+          }
+        });
+        await context.routeWebSocket("**/*", (socket) => socket.close());
+        for (const old of context.pages()) await old.close();
+      }
+      // Desktop mode leaves existing tabs alone: only the page this session
+      // opens below is owned by the session.
       const page = await context.newPage();
       page.setDefaultTimeout(10_000);
       const instance: Running = { context, page, touched: Date.now(), pending: new Set() };
+      if (cdpBrowser) instance.cdpBrowser = cdpBrowser;
       running.set(id, instance);
-      context.on("page", (popup) => {
-        void popup.close();
-      });
+      if (!cdpBrowser)
+        context.on("page", (popup) => {
+          void popup.close();
+        });
       page.on("dialog", (dialog) => {
         void dialog.dismiss();
       });
@@ -415,8 +453,15 @@ export async function createBrowserManager(
       await persist(initial);
       return await navigate(id, url);
     } catch (error) {
-      await context.close().catch(() => {});
       await Promise.allSettled(running.get(id)?.pending ?? []);
+      if (cdpBrowser) {
+        // The tab, not the shared browser, is this session's failure surface.
+        const created = running.get(id);
+        if (created) await created.page.close().catch(() => {});
+        await cdpBrowser.close().catch(() => {});
+      } else {
+        await context.close().catch(() => {});
+      }
       running.delete(id);
       if (previous) {
         const failed: Session = {
