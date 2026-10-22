@@ -67,7 +67,14 @@ export async function createApp(
   const intelligence = new CopilotKitIntelligence({ apiKey: config.intelligenceApiKey });
   const runtime = makeRuntime(config, agent, auth, intelligence);
   const app = new Hono<{ Variables: { owner: string } }>();
-  const origins = new Set([...config.allowedOrigins, new URL(config.publicUrl).origin]);
+  const origins = new Set([
+    ...config.allowedOrigins,
+    new URL(config.publicUrl).origin,
+    // The private door serves the same bundle from its own scheme + host.
+    ...(config.autologinHost
+      ? [`https://${config.autologinHost}`, `http://${config.autologinHost}`]
+      : []),
+  ]);
   app.use("*", async (c, next) => {
     const origin = c.req.header("origin");
     if (origin && !origins.has(origin)) return c.json({ error: "Origin is not allowed" }, 403);
