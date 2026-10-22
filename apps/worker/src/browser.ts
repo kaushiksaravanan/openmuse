@@ -221,12 +221,15 @@ export async function createBrowserManager(
     // never set through a JS value assignment and never returns with the response.
     await page.keyboard.insertText(text);
   }
-  // Pointer bounds follow the live page viewport (a desktop-browser attach is
-  // larger than 1280x800), so coordinates stay 1:1 with the screenshot.
+  // Pointer bounds follow the live page viewport (page.viewportSize() reports
+  // the emulation default, not the real tab size, when attached over CDP), so
+  // coordinates stay 1:1 with the screenshot.
   async function inputCredentials(id: string, input: Record<string, unknown>) {
     const { page } = active(id);
     const { type, x, y, key, text, deltaY } = input;
-    const viewport = page.viewportSize() ?? { width: 1280, height: 800 };
+    const viewport = (await page
+      .evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }))
+      .catch(() => page.viewportSize())) ?? { width: 1280, height: 800 };
     const point = (value: unknown, max: number): value is number =>
       typeof value === "number" && Number.isFinite(value) && value >= 0 && value < max;
     const pressable =
