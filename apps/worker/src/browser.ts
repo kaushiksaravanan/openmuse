@@ -221,30 +221,27 @@ export async function createBrowserManager(
     // never set through a JS value assignment and never returns with the response.
     await page.keyboard.insertText(text);
   }
+  // Pointer bounds follow the live page viewport (a desktop-browser attach is
+  // larger than 1280x800), so coordinates stay 1:1 with the screenshot.
   async function inputCredentials(id: string, input: Record<string, unknown>) {
     const { page } = active(id);
     const { type, x, y, key, text, deltaY } = input;
-    if (
-      type === "click" &&
-      typeof x === "number" &&
-      typeof y === "number" &&
-      Number.isFinite(x) &&
-      Number.isFinite(y) &&
-      x >= 0 &&
-      x < 1280 &&
-      y >= 0 &&
-      y < 800
-    )
+    const viewport = page.viewportSize() ?? { width: 1280, height: 800 };
+    const point = (value: unknown, max: number): value is number =>
+      typeof value === "number" && Number.isFinite(value) && value >= 0 && value < max;
+    const pressable =
+      /^(Enter|Tab|Escape|Backspace|Delete|Insert|Space|ArrowUp|ArrowDown|ArrowLeft|ArrowRight|Home|End|PageUp|PageDown|Control\+a|Control\+c|Control\+v|Control\+l|Control\+t|Control\+w|Meta\+a|Shift\+Tab)$/;
+    if (type === "click" && point(x, viewport.width) && point(y, viewport.height))
       await page.mouse.click(x, y);
+    else if (type === "double_click" && point(x, viewport.width) && point(y, viewport.height))
+      await page.mouse.dblclick(x, y);
+    else if (type === "right_click" && point(x, viewport.width) && point(y, viewport.height))
+      await page.mouse.click(x, y, { button: "right" });
+    else if (type === "move" && point(x, viewport.width) && point(y, viewport.height))
+      await page.mouse.move(x, y);
     else if (type === "text" && typeof text === "string" && text.length <= 10_000)
       await page.keyboard.insertText(text);
-    else if (
-      type === "key" &&
-      typeof key === "string" &&
-      /^(Enter|Tab|Escape|Backspace|Delete|ArrowUp|ArrowDown|ArrowLeft|ArrowRight|Home|End|PageUp|PageDown|Control\+a|Meta\+a|Shift\+Tab)$/.test(
-        key,
-      )
-    )
+    else if (type === "key" && typeof key === "string" && pressable.test(key))
       await page.keyboard.press(key);
     else if (
       type === "scroll" &&

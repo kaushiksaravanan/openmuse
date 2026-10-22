@@ -54,6 +54,8 @@ export interface Config {
   vaultKey?: string;
   taskWorkerEnabled?: boolean;
   webSearchEnabled?: boolean;
+  /** True when the browser worker attaches to a visible desktop browser the person can watch and drive agent input on. */
+  browserDesktop?: boolean;
   computerEnabled?: boolean;
   computerImage?: string;
   computerDeploymentId?: string;
@@ -162,6 +164,7 @@ export function readConfig(): Config {
     vaultKey: process.env.VAULT_KEY || undefined,
     taskWorkerEnabled: process.env.TASK_WORKER_ENABLED !== "false",
     webSearchEnabled: process.env.WEB_SEARCH_ENABLED !== "false",
+    browserDesktop: process.env.BROWSER_DESKTOP === "true",
     computerEnabled: process.env.COMPUTER_ENABLED === "true",
     computerImage: process.env.COMPUTER_IMAGE ?? "openmuse-computer:local",
     computerDeploymentId: process.env.COMPUTER_DEPLOYMENT_ID,

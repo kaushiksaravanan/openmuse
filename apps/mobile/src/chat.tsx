@@ -99,6 +99,14 @@ export function WorkspaceTools() {
     ),
   });
   useRenderTool({
+    name: "use_browser",
+    description: "Show the agent operating the browser tab",
+    parameters: displayParameters,
+    render: ({ result, status }) => (
+      <ServerToolCard name="Browser screen" result={result} loading={status !== "complete"} />
+    ),
+  });
+  useRenderTool({
     name: "present_choices",
     description: "Show prepared choices for the conversation",
     parameters: displayParameters,
