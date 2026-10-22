@@ -131,7 +131,15 @@ export async function createApp(
     if (++loginAttempts > 30)
       throw new AppError("Too many sign-in attempts. Try again in a minute.", 429);
     const body = z.object({ accessKey: z.string().optional() }).parse(await c.req.json());
-    const session = await auth.session(body.accessKey);
+    // The private ingress stamp is derived by nginx from the connection itself
+    // (loopback only via tailscale serve) plus the Door host, so a client
+    // cannot forge it from the public interface.
+    const [doorSource = "", doorHost = ""] = (c.req.header("x-openmuse-private") ?? "").split("|");
+    const autoKey =
+      config.autologinHost && doorSource === "1" && doorHost === config.autologinHost
+        ? config.accessKey
+        : undefined;
+    const session = await auth.session(body.accessKey ?? autoKey);
     await workspace.ensureSample("local-user", actions);
     await agent.ensure("local-user");
     if (config.mode === "sample") await agent.refreshIdeas("local-user");

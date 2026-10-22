@@ -35,6 +35,8 @@ export interface Config {
   dataDir: string;
   databaseUrl?: string;
   accessKey?: string;
+  /** Host name of a private ingress (e.g. *.ts.net) that may open without the key. */
+  autologinHost?: string;
   encryptionKey?: string;
   model?: string;
   jevMode?: "off" | "sample" | "live";
@@ -142,6 +144,7 @@ export function readConfig(): Config {
     dataDir: resolve(process.env.DATA_DIR ?? ".openmuse"),
     databaseUrl: process.env.DATABASE_URL,
     accessKey: process.env.OPENMUSE_ACCESS_KEY,
+    autologinHost: process.env.OPENMUSE_AUTOLOGIN_HOST?.trim() || undefined,
     encryptionKey: process.env.TOKEN_ENCRYPTION_KEY,
     model: process.env.MODEL,
     jevMode,

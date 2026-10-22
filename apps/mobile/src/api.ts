@@ -1,10 +1,17 @@
 import { Platform } from "react-native";
 import { readApiPayload } from "./api-response";
 
-export const API_URL = (
-  process.env.EXPO_PUBLIC_API_URL ||
-  (Platform.OS === "android" ? "http://10.0.2.2:8787" : "http://localhost:8787")
-).replace(/\/$/, "");
+// On web a bundle served next to the API talks to its own origin, so the app
+// works on every door (public IP, localhost tunnel, private *.ts.net name).
+const envUrl = process.env.EXPO_PUBLIC_API_URL;
+const platformUrl =
+  Platform.OS === "android"
+    ? "http://10.0.2.2:8787"
+    : Platform.OS === "web"
+      ? window.location.origin
+      : "http://localhost:8787";
+
+export const API_URL = (envUrl || platformUrl).replace(/\/$/, "");
 
 export class MuseApi {
   constructor(readonly token: string) {}
